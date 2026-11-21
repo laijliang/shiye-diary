@@ -1,0 +1,141 @@
+/* ============================================================
+   拾页日记 · Design Tokens v2
+   一种纸、一种墨、一个主色、一组情绪色。
+   原则：情绪色是数据，不进入可点击控件；主色只做结构与选中。
+   ============================================================ */
+
+:root {
+  color-scheme: light;
+
+  /* ---- 纸与墨 ---- */
+  --paper: #F5EFE3;
+  --paper-2: #EDE5D6;
+  --card: #FFFDF8;
+  --card-2: #FAF5EB;
+  --ink: #211C15;
+  --ink-2: #5B5347;
+  --ink-3: #766D5F;
+  --hairline: rgba(48, 38, 26, .10);
+  --hairline-strong: rgba(48, 38, 26, .16);
+  --scrim: rgba(36, 27, 18, .38);
+
+  /* 角色 SVG 依赖的旧名，保留以免插画缺色 */
+  --white: #FFFFFF;
+  --cream: #FBF1D8;
+  --line: #E9E2D6;
+  --line-soft: #DCD3C5;
+
+  /* ---- 树皮棕：结构 / 主按钮 / 墨色重音 ---- */
+  --bark-900: #241A11;
+  --bark-800: #3A2A1C;
+  --bark-700: #4E3A28;
+  --bark-600: #6B5238;
+  --bark-500: #83694C;
+  --bark-400: #9A7E5E;
+  --bark-300: #C2AC90;
+  --bark-200: #D9C9B4;
+  --bark-100: #E8DCC9;
+  --bark-50: #F3EBDD;
+
+  /* ---- 叶绿：只给「活着」的状态（麦克风、在线点、开关） ---- */
+  --leaf-700: #345A43;
+  --leaf-600: #44715A;
+  --leaf-500: #5E8F71;
+  --leaf-400: #93C2A7;
+  --leaf-300: #B6D9C4;
+  --leaf-200: #D4E7DA;
+  --leaf-100: #E7F1EA;
+
+  /* ---- 黄昏：书签 / 重要片段 ---- */
+  --dusk: #C08A4E;
+  --dusk-deep: #8F5F2C;
+  --dusk-soft: #F6E7D3;
+
+  /* ---- 情绪色：数据色 ---- */
+  --joy: #E39A56;
+  --joy-cell: #F6D9BB;
+  --joy-soft: #FBEDDD;
+  --joy-ink: #7C4718;
+
+  --calm: #D9B96A;
+  --calm-cell: #F1E3BC;
+  --calm-soft: #F8F0D9;
+  --calm-ink: #6A571F;
+
+  --low: #8AA2B8;
+  --low-cell: #D3DFE8;
+  --low-soft: #E9F0F4;
+  --low-ink: #3D4F5E;
+
+  --anxious: #A992CC;
+  --anxious-cell: #DED3EE;
+  --anxious-soft: #EFE9F7;
+  --anxious-ink: #513D75;
+
+  --mixed-soft: #F2E6DA;
+  --mixed-ink: #4A382A;
+
+  /* ---- 破坏性操作：陶土色，不用纯红 ---- */
+  --danger: #B5563F;
+
+  /* ---- 字体 ---- */
+  --font-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun", serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "HarmonyOS Sans SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+
+  /* ---- 圆角 ---- */
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 18px;
+  --r-xl: 22px;
+  --r-sheet: 26px;
+  --r-pill: 999px;
+
+  /* ---- 间距 ---- */
+  --gutter: 20px;
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+
+  /* ---- 浮层高度 ---- */
+  --shadow-1: 0 1px 2px rgba(44, 33, 21, .06), 0 10px 22px -14px rgba(44, 33, 21, .32);
+  --shadow-2: 0 2px 8px rgba(44, 33, 21, .08), 0 26px 50px -26px rgba(44, 33, 21, .42);
+  --shadow-lift: 0 18px 40px -24px rgba(44, 33, 21, .40);
+
+  /* ---- 缓动：自定义曲线，不用内置 ease-in ---- */
+  --ease-out: cubic-bezier(.23, 1, .32, 1);
+  --ease-in-out: cubic-bezier(.77, 0, .175, 1);
+  --ease-drawer: cubic-bezier(.32, .72, 0, 1);
+  --dur-1: 120ms;
+  --dur-2: 180ms;
+  --dur-3: 240ms;
+  --dur-4: 320ms;
+  --dur-5: 480ms;
+
+  /* ---- 层级 ---- */
+  --z-content: 1;
+  --z-tab: 40;
+  --z-dock: 41;
+  --z-sheet: 60;
+  --z-toast: 80;
+  --z-overlay: 100;
+  --z-cover: 200;
+
+  /* ---- 设备 ---- */
+  --app-max: 430px;
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --tab-h: 58px;
+  --composer-h: 56px;
+}
+
+/* ---- 情绪主题：挂 class 即得四个变量 ---- */
+.em-joy { --e: var(--joy); --e-cell: var(--joy-cell); --e-soft: var(--joy-soft); --e-ink: var(--joy-ink); }
+.em-calm { --e: var(--calm); --e-cell: var(--calm-cell); --e-soft: var(--calm-soft); --e-ink: var(--calm-ink); }
+.em-low { --e: var(--low); --e-cell: var(--low-cell); --e-soft: var(--low-soft); --e-ink: var(--low-ink); }
+.em-anxious { --e: var(--anxious); --e-cell: var(--anxious-cell); --e-soft: var(--anxious-soft); --e-ink: var(--anxious-ink); }
+.em-mixed { --e: var(--joy); --e-cell: var(--mixed-soft); --e-soft: var(--mixed-soft); --e-ink: var(--mixed-ink); }

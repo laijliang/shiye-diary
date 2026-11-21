@@ -1,0 +1,9 @@
+dist/
+web-v1-backup/
+emil-skills/
+*.zip
+*.docx
+*.pdf
+__pycache__/
+.DS_Store
+Thumbs.db
