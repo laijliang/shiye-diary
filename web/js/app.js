@@ -196,6 +196,14 @@
     toastTimer = setTimeout(function () { t.classList.remove('is-on'); }, 2200);
   }
 
+  /* 浮层/开场/成稿打开时，连侧边栏一起移出键盘焦点 */
+  function setShellInert(on) {
+    var shell = document.getElementById('app');
+    if (shell) shell.inert = on;
+    if (tabbarEl) tabbarEl.inert = on;
+    if (sidebarEl) sidebarEl.inert = on;
+  }
+
   function openSheet(opts) {
     if (activeSheetClose) activeSheetClose();
     var layer = el(
@@ -214,8 +222,7 @@
     );
     layerRoot.appendChild(layer);
     document.body.classList.add('sheet-open');
-    var appShell = document.getElementById('app');
-    if (appShell) appShell.inert = true;
+    setShellInert(true);
     var sheet = $('.sheet', layer);
     var scrim = $('.scrim', layer);
     var handle = $('.sheet-handle', layer);
@@ -233,17 +240,24 @@
       layer.classList.remove('is-dragging');
       void sheet.offsetHeight; /* 让拖拽位置先成为过渡起点 */
       layer.classList.remove('is-open');
-      sheet.style.transform = 'translateY(102%)';
+      if (window.innerWidth < 900) {
+        sheet.style.transform = 'translateY(102%)';
+      } else {
+        /* 桌面是居中对话框，退回基态而不是滑出屏幕 */
+        sheet.style.transform = '';
+        sheet.style.opacity = '0';
+      }
       scrim.style.opacity = '0';
-      if (appShell) appShell.inert = false;
+      setShellInert(false);
       setTimeout(function () { layer.remove(); }, reduced ? 40 : 340);
       if (activeSheetClose === close) activeSheetClose = null;
     }
     function onKey(e) { if (e.key === 'Escape') close(); }
     activeSheetClose = close;
 
-    /* 从把手往下拖：1:1 跟随，松手按位移或速度决定去留 */
+    /* 从把手往下拖：1:1 跟随，松手按位移或速度决定去留（仅手机/平板） */
     handle.addEventListener('pointerdown', function (e) {
+      if (window.innerWidth >= 900) return;
       if (e.target.closest('.sheet-close')) return;
       drag = { id: e.pointerId, y: e.clientY, dy: 0, lastY: e.clientY, lastT: performance.now(), v: 0 };
       try { handle.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
@@ -318,6 +332,7 @@
     var genLayer = $('.gen-layer');
     if (genLayer) genLayer.remove();
     document.body.style.overflow = '';
+    if (!$('.cover-wrap')) setShellInert(false);
     var t = $('.toast');
     if (t) t.classList.remove('is-on');
     clearTimeout(toastTimer);
@@ -370,9 +385,67 @@
     document.body.appendChild(tabbarEl);
   }
 
+  /* 桌面侧边栏：≥900px 时替代底部 tabbar，手机端隐藏 */
+  var sidebarEl = null;
+
+  function buildSidebar() {
+    if (sidebarEl) return;
+    sidebarEl = el(
+      '<aside class="sidebar" aria-label="侧边导航">' +
+        '<div class="side-brand">' + icon('leaf', 16) + '<span>拾页日记</span></div>' +
+        '<nav class="side-nav" aria-label="主导航">' +
+          '<button class="side-tab" data-nav="chat">' + icon('chat', 20) + '<span>对话</span></button>' +
+          '<button class="side-tab" data-nav="calendar">' + icon('book', 20) + '<span>日历</span></button>' +
+          '<button class="side-tab" data-nav="me">' + icon('user', 20) + '<span>我的</span></button>' +
+        '</nav>' +
+        '<div class="side-today">' +
+          '<span class="side-today-label">今天</span>' +
+          '<b id="side-count">0 段</b>' +
+          '<button type="button" class="side-today-go" id="side-go">翻开这一页 →</button>' +
+        '</div>' +
+        '<button type="button" class="side-persona" data-side-persona aria-label="阿页的人设说明">' +
+          '<img class="mascot" src="assets/ayeh-listen-face.webp" width="32" height="32" alt="">' +
+          '<span class="side-persona-copy"><b>阿页</b><small>黄昏旧书店 · 守书人</small></span>' +
+        '</button>' +
+        '<p class="side-lock">' + icon('lock', 12) + ' 文字只留在这台设备</p>' +
+      '</aside>'
+    );
+    document.body.appendChild(sidebarEl);
+
+    $('.side-today-go', sidebarEl).addEventListener('click', function () {
+      if (state.entries[TODAY]) navigate('/diary/' + TODAY);
+      else {
+        var n = state.messages.filter(function (m) { return m.role === 'user' && !m.command; }).length;
+        if (isGenerationDue() && n) runGeneration();
+        else navigate('/calendar');
+      }
+    });
+    $('[data-side-persona]', sidebarEl).addEventListener('click', openPersonaSheet);
+  }
+
+  function updateSidebar(page) {
+    if (!sidebarEl) return;
+    var count = state.messages.filter(function (m) { return m.role === 'user' && !m.command; }).length;
+    var c = $('#side-count', sidebarEl);
+    if (c) c.textContent = count + ' 段';
+    var go = $('#side-go', sidebarEl);
+    if (go) {
+      var e = state.entries[TODAY];
+      go.textContent = e ? '翻开这一页 →' : (isGenerationDue() ? '现在整理 →' : '今晚 ' + state.settings.genTime + ' 成稿');
+    }
+    var p = page || (location.hash.replace(/^#\/?/, '').split('/')[0] || 'chat');
+    $$('.side-tab', sidebarEl).forEach(function (b) {
+      var on = b.getAttribute('data-nav') === p;
+      b.classList.toggle('is-active', on);
+      if (on) b.setAttribute('aria-current', 'page');
+      else b.removeAttribute('aria-current');
+    });
+  }
+
   function setTabbar(page) {
     if (!tabbarEl) buildTabbar();
     document.body.dataset.route = page;
+    updateSidebar(page);
     var idx = NAV_ORDER.indexOf(page);
     var ind = $('.tab-indicator', tabbarEl);
     var tabs = $$('.tab', tabbarEl);
@@ -522,15 +595,17 @@
 
   function updateDayLine() {
     var line = $('.day-line', view);
-    if (!line) return;
-    var count = state.messages.filter(function (m) { return m.role === 'user' && !m.command; }).length;
-    var b = $('b', line);
-    if (b) b.textContent = count + ' 段';
-    var go = $('.day-line-go', line);
-    if (go) {
-      var e = state.entries[TODAY];
-      go.textContent = e ? '翻开这一页 →' : (isGenerationDue() ? '现在整理 →' : '今晚 ' + state.settings.genTime + ' 成稿');
+    if (line) {
+      var count = state.messages.filter(function (m) { return m.role === 'user' && !m.command; }).length;
+      var b = $('b', line);
+      if (b) b.textContent = count + ' 段';
+      var go = $('.day-line-go', line);
+      if (go) {
+        var e = state.entries[TODAY];
+        go.textContent = e ? '翻开这一页 →' : (isGenerationDue() ? '现在整理 →' : '今晚 ' + state.settings.genTime + ' 成稿');
+      }
     }
+    updateSidebar();
   }
 
   function refreshMessages() {
@@ -881,6 +956,13 @@
       syncSend();
       sendText(t);
       input.focus();
+    });
+    /* 桌面外接键盘 / 输入法上屏后回车直接发送；中文输入中的回车不算 */
+    input.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter' || e.isComposing) return;
+      e.preventDefault();
+      if (form.requestSubmit) form.requestSubmit();
+      else form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     });
 
     list.addEventListener('click', function (e) {
@@ -1297,7 +1379,7 @@
         '<h2 class="rail-title">本月书页 <span>' + filtered.length + ' 篇</span></h2>' +
         '<button class="chip filter-chip ' + (filterOn ? 'is-on' : '') + '" data-open-filter>' + icon('filter', 14) + chipLabel + '</button>' +
       '</div>' +
-      '<div class="rail" data-rail role="group" aria-roledescription="横向书页" aria-label="本月书页">' + cards + '</div>' +
+      '<div class="rail" data-rail role="group" aria-roledescription="书页列表" aria-label="本月书页">' + cards + '</div>' +
       '<div class="rail-foot">' +
         (filtered.length <= 7 ? '<div class="rail-dots">' + dots + '</div>' : '<span class="rail-count micro">1 / ' + filtered.length + '</span>') +
         '<span class="rail-hint">' + (filtered.length > 1 ? '左右滑动' : '') + '</span>' +
@@ -1317,24 +1399,26 @@
     view.innerHTML =
       '<div class="page page-cal">' +
         '<div class="page-body">' +
-          '<header class="cal-head">' +
-            '<p class="eyebrow">情绪记忆簿</p>' +
-            '<div class="cal-head-row">' +
-              '<h1 class="month-big"><b>' + (m + 1) + '</b><span>月</span><em>' + y + '</em></h1>' +
-              '<div class="month-nav">' +
-                (!isCurrentMonth() ? '<button class="month-btn month-today" data-month-today aria-label="回到本月">今天</button>' : '') +
-                '<button class="month-btn" data-month="prev" aria-label="上个月">' + icon('chevron-left', 17) + '</button>' +
-                '<button class="month-btn" data-month="next" aria-label="下个月"' + (isCurrentMonth() ? ' disabled' : '') + '>' + icon('chevron-right', 17) + '</button>' +
+          '<div class="cal-col">' +
+            '<header class="cal-head">' +
+              '<p class="eyebrow">情绪记忆簿</p>' +
+              '<div class="cal-head-row">' +
+                '<h1 class="month-big"><b>' + (m + 1) + '</b><span>月</span><em>' + y + '</em></h1>' +
+                '<div class="month-nav">' +
+                  (!isCurrentMonth() ? '<button class="month-btn month-today" data-month-today aria-label="回到本月">今天</button>' : '') +
+                  '<button class="month-btn" data-month="prev" aria-label="上个月">' + icon('chevron-left', 17) + '</button>' +
+                  '<button class="month-btn" data-month="next" aria-label="下个月"' + (isCurrentMonth() ? ' disabled' : '') + '>' + icon('chevron-right', 17) + '</button>' +
+                '</div>' +
               '</div>' +
-            '</div>' +
-            '<p class="cal-sub">这个月，你打开过 <b>' + total + '</b> 次书页</p>' +
-          '</header>' +
-          '<section class="cal">' +
-            '<div class="week-row">' + ['日', '一', '二', '三', '四', '五', '六'].map(function (w) { return '<span class="week-cell">' + w + '</span>'; }).join('') + '</div>' +
-            '<div class="days-grid">' + cells + '</div>' +
-            (total ? '<div class="cal-summary"><div class="emotion-bar">' + bar + '</div><p class="cal-note">' + note + '</p></div>' : '') +
-          '</section>' +
-          emptyBlock +
+              '<p class="cal-sub">这个月，你打开过 <b>' + total + '</b> 次书页</p>' +
+            '</header>' +
+            '<section class="cal">' +
+              '<div class="week-row">' + ['日', '一', '二', '三', '四', '五', '六'].map(function (w) { return '<span class="week-cell">' + w + '</span>'; }).join('') + '</div>' +
+              '<div class="days-grid">' + cells + '</div>' +
+              (total ? '<div class="cal-summary"><div class="emotion-bar">' + bar + '</div><p class="cal-note">' + note + '</p></div>' : '') +
+            '</section>' +
+          '</div>' +
+          '<div class="cal-deck">' + emptyBlock + '</div>' +
         '</div>' +
       '</div>';
 
@@ -1407,7 +1491,7 @@
     var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     function step() {
-      return n > 1 ? Math.abs(cards[1].offsetLeft - cards[0].offsetLeft) : 1;
+      return n > 1 ? Math.max(1, Math.abs(cards[1].offsetLeft - cards[0].offsetLeft)) : 1;
     }
     function sync() {
       var i = Math.max(0, Math.min(n - 1, Math.round(rail.scrollLeft / step())));
@@ -1982,10 +2066,12 @@
     );
     layerRoot.appendChild(layer);
     document.body.style.overflow = 'hidden';
+    setShellInert(true);
 
     var done = false;
     function closeLayer() {
       document.body.style.overflow = '';
+      setShellInert(false);
       layer.style.transition = 'opacity 200ms ease';
       layer.style.opacity = '0';
       setTimeout(function () { layer.remove(); }, 220);
@@ -2027,7 +2113,6 @@
      ============================================================ */
   function showSplash() {
     if ($('.cover-wrap')) return;
-    var appEl = $('.app');
     var now = new Date();
     var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -2039,9 +2124,11 @@
         '</div>' +
       '</div>'
     );
+    var scrim = el('<div class="cover-scrim" aria-hidden="true"></div>');
     document.body.appendChild(wrap);
+    document.body.appendChild(scrim);
     document.body.classList.add('cover-open');
-    if (appEl) appEl.inert = true;
+    setShellInert(true);
 
     var cover = $('.cover', wrap);
     var canvas = $('.cover-canvas', wrap);
@@ -2158,7 +2245,7 @@
       c.fillStyle = 'rgba(244,236,220,.62)';
       c.fillText('SHIYE', w - 30, rowY);
 
-      var titleSize = Math.min(38, Math.max(30, w * .09));
+      var titleSize = Math.min(56, Math.max(30, w * .09));
       var lineH = titleSize * 1.35;
       var y0 = h * .40;
       c.textAlign = 'left';
@@ -2328,7 +2415,7 @@
 
     function tearDown() {
       document.body.classList.remove('cover-open');
-      if (appEl) appEl.inert = false;
+      setShellInert(false);
       window.removeEventListener('resize', onResize);
     }
     function finish() {
@@ -2337,7 +2424,10 @@
       cover.style.pointerEvents = 'none';
       tearDown();
       render(1);
-      setTimeout(function () { if (document.contains(wrap)) wrap.remove(); }, 60);
+      setTimeout(function () {
+        if (document.contains(wrap)) wrap.remove();
+        if (document.contains(scrim)) scrim.remove();
+      }, 60);
     }
     function cancelAnim() {
       if (animRaf) { cancelAnimationFrame(animRaf); animRaf = null; }
@@ -2350,7 +2440,8 @@
           tearDown();
           wrap.style.transition = 'opacity 160ms ease';
           wrap.style.opacity = '0';
-          setTimeout(function () { wrap.remove(); }, 190);
+          setTimeout(function () { if (document.contains(wrap)) wrap.remove(); }, 190);
+          setTimeout(function () { if (document.contains(scrim)) scrim.remove(); }, 430);
         } else {
           render(0);
         }
@@ -2463,6 +2554,7 @@
 
   if (!location.hash) history.replaceState(null, '', '#/chat');
   buildTabbar();
+  buildSidebar();
   render();
   checkDueGeneration();
   if (!sessionStorage.getItem('shiye.splash.seen')) {
