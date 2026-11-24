@@ -27,9 +27,14 @@
 </p>
 
 <p align="center">
+  <img src="docs/screenshots/desktop-cover.jpg" width="760" alt="桌面端：620px 书封">
+</p>
+<p align="center"><sub>桌面上书封是一本 620px 的书，背景压暗；向左拖 / 轻点 / Enter 打开。</sub></p>
+
+<p align="center">
   <img src="docs/screenshots/desktop-chat.jpg" width="760" alt="桌面端：侧边栏 + 对话 + 日记卡">
 </p>
-<p align="center"><sub>桌面 ≥900px：左侧导航与今日状态，主区域按阅读宽度居中；书封是一本 620px 的书。</sub></p>
+<p align="center"><sub>桌面 ≥900px：左侧导航与今日状态，主区域按阅读宽度居中。</sub></p>
 
 ## 桌面上测试
 
