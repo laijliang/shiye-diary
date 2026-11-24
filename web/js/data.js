@@ -200,7 +200,7 @@
     ]
   };
 
-  const SUGGESTIONS = ['今天有点累', '有件小事想记下来'];
+  const SUGGESTIONS = ['今天有点累', '有件小事想记下来', '帮我整理今天的日记'];
 
   const VOICE_SINGLE = [
     '今天下班的时候，天已经黑了，路边的桂花有点香。',

@@ -1453,6 +1453,7 @@ body.cover-open { overflow: hidden; }
 .group-card,
 .sheet,
 .composer,
+.diary-note-card,
 .gen-preview,
 .gen-sheet {
   background-color: var(--card);
@@ -1474,3 +1475,24 @@ body.cover-open { overflow: hidden; }
   background-repeat: no-repeat, no-repeat;
   background-blend-mode: normal, multiply;
 }
+
+
+/* ============================================================
+   CHAT · 改好的日记卡
+   ============================================================ */
+.diary-note { margin: 14px 0; }
+.diary-note.is-new { animation: bubbleIn 220ms var(--ease-out) both; }
+.diary-note-card {
+  display: block;
+  width: 100%;
+  padding: 15px 16px 13px;
+  border-radius: var(--r-lg);
+  text-align: left;
+  box-shadow: var(--shadow-1);
+  transition: transform var(--dur-1) var(--ease-out);
+}
+.diary-note-card:active { transform: scale(.985); }
+.diary-note-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.diary-note-label { font-size: 11px; letter-spacing: .06em; color: var(--ink-3); }
+.diary-note-summary { margin-top: 9px; font-family: var(--font-serif); font-size: 16px; line-height: 1.6; color: var(--ink); }
+.diary-note-go { display: inline-block; margin-top: 9px; font-size: 11.5px; color: var(--bark-700); }

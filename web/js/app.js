@@ -167,8 +167,9 @@
 
   function checkDueGeneration() {
     if (!state.settings.autoGen || !isGenerationDue() || state.entries[TODAY]) return;
-    if (!state.messages.some(function (m) { return m.role === 'user'; })) return;
-    var fallback = D.buildEntryFromMessages(state.messages, null);
+    var realMsgs = state.messages.filter(function (m) { return m.role === 'user' && m.text && !m.command; });
+    if (!realMsgs.length) return;
+    var fallback = D.buildEntryFromMessages(realMsgs, null);
     if (!fallback) return;
     fallback.date = TODAY;
     fallback.generatedAt = state.settings.genTime;
@@ -398,7 +399,7 @@
   }
 
   function renderChat() {
-    var userCount = state.messages.filter(function (m) { return m.role === 'user'; }).length;
+    var userCount = state.messages.filter(function (m) { return m.role === 'user' && !m.command; }).length;
     var todayEntry = state.entries[TODAY];
     var due = isGenerationDue();
     view.innerHTML =
@@ -462,7 +463,7 @@
           return '<button class="chip chip-suggest" data-suggest="' + esc(s) + '">' + esc(s) + '</button>';
         }).join('') +
       '</div>' +
-      '<p class="chat-hint">长按一句话，可以夹上书签</p>' +
+      '<p class="chat-hint">长按一句话夹书签 · 也可以直接说「整理今天的日记」</p>' +
     '</div>';
   }
 
@@ -475,6 +476,19 @@
     var html = '';
     var lastRole = null;
     state.messages.forEach(function (m) {
+      if (m.type === 'diary') {
+        var de = state.entries[m.date];
+        var dayLabel = de ? '今天的这一页' : '这一页';
+        html += '<div class="diary-note' + (m.id === newMsgId ? ' is-new' : '') + '">' +
+          '<button type="button" class="diary-note-card" data-diary-open="' + esc(m.date) + '" aria-label="翻开' + esc(D.monthDayCN(D.parseKey(m.date))) + '的日记">' +
+            '<span class="diary-note-top"><span class="diary-note-label">' + dayLabel + '</span>' + (de ? emChip(entryEmotion(de), de.mix, 18) : '') + '</span>' +
+            '<p class="diary-note-summary">' + (de ? esc(de.summary) : '先跟我说两句今天的事。') + '</p>' +
+            (de ? '<span class="diary-note-go">翻开这一页 →</span>' : '') +
+          '</button>' +
+        '</div>';
+        lastRole = null;
+        return;
+      }
       if (m.type === 'split') {
         html += '<div class="split-note">' + esc(m.text || '换了一段 · 继续') + '</div>';
         lastRole = null;
@@ -501,7 +515,7 @@
   }
 
   function updateSegCount() {
-    var n = state.messages.filter(function (m) { return m.role === 'user'; }).length;
+    var n = state.messages.filter(function (m) { return m.role === 'user' && !m.command; }).length;
     var el = $('#seg-count');
     if (el) el.textContent = n;
   }
@@ -509,9 +523,14 @@
   function updateDayLine() {
     var line = $('.day-line', view);
     if (!line) return;
-    var count = state.messages.filter(function (m) { return m.role === 'user'; }).length;
+    var count = state.messages.filter(function (m) { return m.role === 'user' && !m.command; }).length;
     var b = $('b', line);
     if (b) b.textContent = count + ' 段';
+    var go = $('.day-line-go', line);
+    if (go) {
+      var e = state.entries[TODAY];
+      go.textContent = e ? '翻开这一页 →' : (isGenerationDue() ? '现在整理 →' : '今晚 ' + state.settings.genTime + ' 成稿');
+    }
   }
 
   function refreshMessages() {
@@ -536,7 +555,8 @@
       role: 'user',
       text: String(text).trim(),
       time: D.nowHM(),
-      important: false
+      important: false,
+      command: !!parseDiaryCommand(text)
     };
     newMsgId = m.id;
     state.messages.push(m);
@@ -560,34 +580,231 @@
     return txt;
   }
 
+  function diaryContext() {
+    var e = state.entries[TODAY];
+    if (!e) return '今天还没有成稿。';
+    return '今天的日记页已存在。情绪：' + emotionMeta(entryEmotion(e)).label +
+      '；摘要：' + e.summary +
+      '；正文（节选）：' + String(e.body || '').slice(0, 600);
+  }
+
+  function chatSystemPrompt() {
+    return '你是「阿页」，黄昏旧书店的守书人，也是「拾页日记」里陪用户说话的角色。' +
+      '使用简体中文，每次 2 到 4 句，温柔、克制、句子偏短；不说教、不诊断、不主动给建议、不使用网络热梗；可以用书店、书页、黄昏、晚风这类意象。' +
+      '你知道自己在这个应用里能做什么：陪用户说话；把今天说过的话整理成一页第一人称日记；按用户的明确要求修改今天这一页的摘要、正文或情绪；到设定时间应用会自动收稿。' +
+      '今天是 ' + D.monthDayCN(D.parseKey(TODAY)) + '。' + diaryContext() +
+      ' 你必须只返回一个 JSON 对象，不要 Markdown、不要代码块：' +
+      '{"reply":"对用户说的 2-4 句话","action":{"type":"none"}}。' +
+      '当用户明确要求整理今天这一页时，action 用 {"type":"generate_entry"}。' +
+      '当用户明确要求改这一页时，action 用 {"type":"update_entry","summary":"可选","body":"可选","emotion":"joy|calm|low|anxious|mixed","mix":["joy","low"]可选}；只填用户要求改的字段。' +
+      '普通倾诉、提问、闲聊一律用 {"type":"none"}，不要擅自生成或改写日记。' +
+      'reply 里不要提 JSON、动作、工具这些词，就像阿页平常说话。用户问你能做什么时，用 2-3 句说清楚：陪聊、把今天整理成一页、按意思改这一页。';
+  }
+
+  function findEmotionWord(t) {
+    if (/开心|高兴|快乐|喜悦|愉快/.test(t)) return 'joy';
+    if (/平静|安静|安宁|安稳/.test(t)) return 'calm';
+    if (/低落|难过|伤心|失落|委屈|丧/.test(t)) return 'low';
+    if (/焦虑|烦躁|压力|紧张|烦死|慌/.test(t)) return 'anxious';
+    if (/复杂|混合|说不清|两种心情/.test(t)) return 'mixed';
+    return null;
+  }
+
+  function parseDiaryCommand(text) {
+    var t = String(text || '');
+    if (/你能做什么|会做什么|能帮我做什么|有什么功能|你能干嘛|你会干嘛|你的能力/.test(t)) {
+      return { type: 'capabilities' };
+    }
+    var sum = t.match(/(?:摘要|一句话|卡片)[^改换写为]{0,8}(?:改成|换成|写成|改为|换为)[：:，,]?\s*[“"「]?([^”"」]+?)[”"」]?$/);
+    if (sum && sum[1].trim()) return { type: 'summary', text: sum[1].trim() };
+    var body = t.match(/(?:正文|内容)[^改换写为]{0,8}(?:改成|换成|写成|改为|换为)[：:，,]?\s*[“"「]?([^”"」]+?)[”"」]?$/);
+    if (body && body[1].trim()) return { type: 'body', text: body[1].trim() };
+    var emo = findEmotionWord(t);
+    var change = /(改成|换成|变成|调成|换一种|改一下|换一下)/.test(t);
+    var target = /(这一页|日记|情绪|心情|颜色|色调)/.test(t);
+    if (emo && change && target) {
+      return { type: 'emotion', emotion: emo };
+    }
+    if (/((重写|改写|润色|换一版|再写一版).{0,8}(日记|这一页|摘要|正文))|((日记|这一页|摘要|正文).{0,8}(重写|改写|润色|改得|写得))/.test(t)) {
+      return { type: 'rewrite', text: t };
+    }
+    if (/(生成|整理|写|收|做|来).{0,8}(日记|一页|这一页|成稿)|成稿|收进书页|写进书里/.test(t)) {
+      return { type: 'generate' };
+    }
+    return null;
+  }
+
+  function currentEntry() {
+    return state.entries[TODAY] || ensureTodayEntry();
+  }
+
+  function handleMockCommand(text) {
+    var cmd = parseDiaryCommand(text);
+    if (!cmd) return null;
+    if (cmd.type === 'capabilities') {
+      return { reply: '我可以听你说，也可以陪你待一会儿。想收起来的时候，跟我说「帮我整理今天的日记」；想改这一页，就告诉我改摘要、正文，还是把情绪换成哪一种。到了设定时间，我会自己把当天收好。' };
+    }
+    if (cmd.type === 'generate') {
+      var userMsgs = state.messages.filter(function (m) { return m.role === 'user' && m.text && !m.command; });
+      if (userMsgs.length) {
+        ensureTodayEntry();
+        return { reply: '好，我把今天说过的话收成一页了。', diary: true };
+      }
+      return state.entries[TODAY]
+        ? { reply: '今天这一页已经在书里了。想重新收一版，先跟我说两句今天的事。', diary: true }
+        : { reply: '今天还没有攒下片段。先说两句吧，我再替你收。' };
+    }
+    if (cmd.type === 'emotion') {
+      var e = currentEntry();
+      e.emotion = cmd.emotion;
+      e.mix = cmd.emotion === 'mixed' ? ['joy', 'low'] : null;
+      state.entries[TODAY] = e;
+      save();
+      return { reply: '把这一页的颜色换成「' + D.EMOTIONS[cmd.emotion].label + '」了。', diary: true };
+    }
+    if (cmd.type === 'summary') {
+      var e2 = currentEntry();
+      e2.summary = cmd.text.slice(0, 80);
+      state.entries[TODAY] = e2;
+      save();
+      return { reply: '摘要换好了。', diary: true };
+    }
+    if (cmd.type === 'body') {
+      var e3 = currentEntry();
+      e3.body = cmd.text;
+      state.entries[TODAY] = e3;
+      save();
+      return { reply: '正文换好了。', diary: true };
+    }
+    if (cmd.type === 'rewrite') {
+      var existing = state.entries[TODAY];
+      var msgs = state.messages.filter(function (m) { return m.role === 'user' && m.text && !m.command; });
+      var frags = existing ? (existing.fragments || []).map(function (f) {
+        if (typeof f === 'string') return { role: 'user', text: f, time: existing.generatedAt, important: false };
+        return { role: 'user', text: f.text, time: f.time, important: !!f.important };
+      }) : [];
+      var source = msgs.length ? msgs : frags;
+      if (!source.length) return { reply: '这一页还没有可以重写的片段。先跟我说两句今天的事吧。' };
+      var base = existing || ensureTodayEntry();
+      var rebuilt = D.buildEntryFromMessages(source, base);
+      if (rebuilt) {
+        rebuilt.date = TODAY;
+        rebuilt.generatedAt = D.nowHM();
+        rebuilt.favorite = base.favorite || false;
+        state.entries[TODAY] = rebuilt;
+        save();
+        return { reply: '我用今天原来的片段重新收了一版。', diary: true };
+      }
+      return { reply: '我试着重新收了一版，但内容还是原来的。想按某种语气重写，可以在「我的 → 模型」里接上模型服务。' };
+    }
+    return null;
+  }
+
+  function pushAi(content, emo) {
+    var text = String(content || '').trim();
+    if (!text) text = '嗯，我在。';
+    var msg = { id: uid(), role: 'ai', text: text, time: D.nowHM(), emotion: emo };
+    newMsgId = msg.id;
+    state.messages.push(msg);
+    pendingCount = Math.max(0, pendingCount - 1);
+    save();
+    if ($('#messages')) {
+      refreshMessages();
+      setHeaderStatus(emo);
+    }
+    if (state.settings.tts && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+    }
+  }
+
+  function pushDiaryRow() {
+    var row = { id: uid(), role: 'system', type: 'diary', date: TODAY, time: D.nowHM() };
+    newMsgId = row.id;
+    state.messages.push(row);
+    save();
+    refreshMessages();
+  }
+
+  function afterDiaryChange(msg) {
+    updateDayLine();
+    if ($('.page-chat')) pushDiaryRow();
+    if (msg) toast(msg);
+  }
+
+  function performDiaryAction(action) {
+    if (!action || !action.type || action.type === 'none') return;
+    if (action.type === 'generate_entry') {
+      var userMsgs = state.messages.filter(function (m) { return m.role === 'user' && m.text && !m.command; });
+      var fallback = ensureTodayEntry();
+      if (hasLlmConfig() && userMsgs.length) {
+        generateEntryWithLlm(fallback).then(function (entry) {
+          state.entries[TODAY] = entry;
+          save();
+          afterDiaryChange('今天的这一页，重新收好了。');
+        });
+      } else {
+        afterDiaryChange('今天的这一页，收好了。');
+      }
+      return;
+    }
+    if (action.type === 'update_entry') {
+      var e = currentEntry();
+      if (typeof action.summary === 'string' && action.summary.trim()) e.summary = action.summary.trim().slice(0, 80);
+      if (typeof action.body === 'string' && action.body.trim()) e.body = action.body.trim();
+      if (action.emotion && D.EMOTIONS[action.emotion]) {
+        e.emotion = action.emotion;
+        if (action.emotion === 'mixed') {
+          var mix = Array.isArray(action.mix) ? action.mix.filter(function (k) { return !!D.EMOTIONS[k]; }).slice(0, 2) : [];
+          e.mix = mix.length === 2 ? mix : ['joy', 'low'];
+        } else {
+          e.mix = null;
+        }
+      }
+      state.entries[TODAY] = e;
+      save();
+      afterDiaryChange('这一页改好了。');
+    }
+  }
+
   function scheduleReply(text) {
     pendingCount += 1;
     showTyping();
     var emo = D.detectEmotion(text);
-    var fallback = nextReply(emo);
-    var reply = hasLlmConfig()
-      ? callLlm([
-        { role: 'system', content: '你是“阿页”，一位温柔克制的叙事陪伴日记助手。使用简体中文，回应用户的当下感受。每次只写 2 到 4 句，避免说教、诊断、承诺或夸张安慰。语气像旧书店里守书的人，自然、有分寸。' }
-      ].concat(chatHistory()), false).catch(function (err) {
+
+    if (hasLlmConfig()) {
+      callLlm([{ role: 'system', content: chatSystemPrompt() }].concat(chatHistory()), true).then(function (content) {
+        var payload = null;
+        try { payload = parseJsonObject(content); } catch (e) { payload = null; }
+        var replyText = payload && typeof payload.reply === 'string' && payload.reply.trim()
+          ? payload.reply.trim()
+          : (content.trim().charAt(0) === '{' ? '好，我记下了。' : content.trim());
+        pushAi(replyText, emo);
+        if (payload && payload.action && payload.action.type && payload.action.type !== 'none') {
+          performDiaryAction(payload.action);
+        }
+      }).catch(function () {
         toast('模型服务暂不可用，已切回演示回复。');
-        return fallback;
-      })
-      : new Promise(function (resolve) { setTimeout(function () { resolve(fallback); }, 950 + Math.random() * 600); });
-    reply.then(function (content) {
-      var msg = { id: uid(), role: 'ai', text: content, time: D.nowHM(), emotion: emo };
-      newMsgId = msg.id;
-      state.messages.push(msg);
-      pendingCount = Math.max(0, pendingCount - 1);
-      save();
-      if ($('#messages')) {
-        refreshMessages();
-        setHeaderStatus(emo);
-      }
-      if (state.settings.tts && 'speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(new SpeechSynthesisUtterance(content));
-      }
-    });
+        var cmd = handleMockCommand(text);
+        if (cmd) {
+          pushAi(cmd.reply, emo);
+          if (cmd.diary) afterDiaryChange(null);
+        } else {
+          pushAi(nextReply(emo), emo);
+        }
+      });
+      return;
+    }
+
+    var mock = handleMockCommand(text);
+    if (mock) {
+      setTimeout(function () {
+        pushAi(mock.reply, emo);
+        if (mock.diary) afterDiaryChange(null);
+      }, 650 + Math.random() * 450);
+      return;
+    }
+    setTimeout(function () { pushAi(nextReply(emo), emo); }, 950 + Math.random() * 600);
   }
 
   function showTyping() {
@@ -672,7 +889,10 @@
         input.value = s.getAttribute('data-suggest');
         syncSend();
         input.focus();
+        return;
       }
+      var d = e.target.closest('[data-diary-open]');
+      if (d) navigate('/diary/' + d.getAttribute('data-diary-open'));
     });
 
     var menu = $('[data-menu]');
@@ -710,8 +930,9 @@
     });
     list.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
-    /* ---- 按住说话 ---- */
+    /* ---- 按住说话：浏览器语音识别；不支持的浏览器明确回退演示 ---- */
     var rec = null;
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 
     function resetListenUI() {
       document.body.classList.remove('is-listening');
@@ -723,24 +944,93 @@
       if (hint) hint.textContent = '松开发送 · 上滑取消';
     }
 
+    function setHint(text) {
+      var hint = $('#listen-hint');
+      if (hint && text) hint.textContent = text;
+    }
+
+    function finalizeSr(r) {
+      if (rec !== r) return;
+      clearTimeout(r.kill);
+      rec = null;
+      resetListenUI();
+      var segs = (r.segments || []).filter(function (s) { return s && String(s).trim(); });
+      if (segs.length) {
+        if (navigator.vibrate) navigator.vibrate(6);
+        sendVoice(segs);
+        return;
+      }
+      var err = r.srError;
+      if (err === 'not-allowed' || err === 'service-not-allowed') toast('需要麦克风权限才能用语音。');
+      else if (err === 'network') toast('语音识别需要联网。');
+      else if (err === 'no-speech') toast('没听清，再说一次。');
+      else if (err === 'start') toast('语音识别启动失败，先用文字输入吧。');
+      else toast('没有听到声音，再试一次。');
+    }
+
     function startRec(e) {
       if (rec) return;
       e.preventDefault();
       try { mic.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
       input.blur();
-      rec = { y: e.clientY, start: Date.now(), cancelled: false, partial: null };
+      var base = { y: e.clientY, start: Date.now(), cancelled: false, mode: SR ? 'sr' : 'demo', partial: null };
+      rec = base;
       document.body.classList.add('is-listening');
       var dock = $('#dock');
       if (dock) dock.classList.add('is-listening');
       var title = $('#listen-title');
-      var hint = $('#listen-hint');
       if (title) title.textContent = '我在听';
-      if (hint) hint.textContent = '松开发送 · 上滑取消';
       if (navigator.vibrate) navigator.vibrate(8);
-      rec.partial = setTimeout(function () {
-        var h = $('#listen-hint');
-        if (h && rec && !rec.cancelled) h.textContent = pick(D.VOICE_PARTIALS);
-      }, 760);
+
+      if (!SR) {
+        setHint('演示转写 · 松开发送 · 上滑取消');
+        base.partial = setTimeout(function () {
+          if (rec === base && !base.cancelled) setHint(pick(D.VOICE_PARTIALS));
+        }, 760);
+        return;
+      }
+
+      var r = new SR();
+      r.lang = 'zh-CN';
+      r.continuous = true;
+      r.interimResults = true;
+      r.maxAlternatives = 1;
+      base.sr = r;
+      base.segments = [];
+      base.srDone = false;
+      base.released = false;
+      base.srError = null;
+      setHint('说话吧 · 松开发送');
+
+      r.onresult = function (ev) {
+        if (rec !== base) return;
+        var finalText = '';
+        var interim = '';
+        for (var i = ev.resultIndex; i < ev.results.length; i++) {
+          var res = ev.results[i];
+          var txt = res[0] && res[0].transcript ? res[0].transcript : '';
+          if (res.isFinal) finalText += txt;
+          else interim += txt;
+        }
+        if (finalText.trim()) base.segments.push(finalText.trim());
+        if (base.cancelled) return;
+        setHint(interim.trim() || finalText.trim() || (base.segments.length ? '已经收下，继续说…' : '说话吧 · 松开发送'));
+      };
+      r.onerror = function (ev) {
+        if (rec === base) base.srError = ev.error;
+      };
+      r.onend = function () {
+        if (rec !== base) return;
+        base.srDone = true;
+        if (base.released) finalizeSr(base);
+        else if (!base.cancelled) setHint('松开发送');
+      };
+      try {
+        r.start();
+      } catch (err) {
+        base.srError = 'start';
+        setHint('语音识别启动失败，松手后可以改用文字');
+      }
     }
 
     function moveRec(e) {
@@ -751,14 +1041,34 @@
       var dock = $('#dock');
       if (dock) dock.classList.toggle('is-cancel', cancelled);
       var title = $('#listen-title');
-      var hint = $('#listen-hint');
       if (title) title.textContent = cancelled ? '松开取消' : '我在听';
-      if (hint) hint.textContent = cancelled ? '这次不记下来' : '松开发送 · 上滑取消';
+      if (cancelled) setHint('这次不记下来');
+      else setHint(rec.mode === 'sr' ? '说话吧 · 松开发送' : '演示转写 · 松开发送 · 上滑取消');
     }
 
     function endRec() {
       if (!rec) return;
       var r = rec;
+      if (r.mode === 'sr') {
+        if (r.cancelled) {
+          rec = null;
+          clearTimeout(r.kill);
+          if (r.sr) { try { r.sr.abort(); } catch (err) { /* ignore */ } }
+          resetListenUI();
+          toast('已取消，这次不记下来。');
+          return;
+        }
+        r.released = true;
+        if (r.srDone) { finalizeSr(r); return; }
+        if (r.srError === 'start') { finalizeSr(r); return; }
+        var title = $('#listen-title');
+        if (title) title.textContent = '正在转写';
+        setHint('松手了，正在把话收下来…');
+        if (r.sr) { try { r.sr.stop(); } catch (err) { finalizeSr(r); return; } }
+        clearTimeout(r.kill);
+        r.kill = setTimeout(function () { finalizeSr(r); }, 4000);
+        return;
+      }
       rec = null;
       clearTimeout(r.partial);
       resetListenUI();
@@ -780,10 +1090,11 @@
       if (rec) endRec();
     });
     mic.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
   }
 
   function openChatMenu() {
-    var n = state.messages.filter(function (m) { return m.role === 'user'; }).length;
+    var n = state.messages.filter(function (m) { return m.role === 'user' && !m.command; }).length;
     var s = openSheet({
       title: '阿页的书桌',
       sub: '今天已收下 ' + n + ' 段心事 · ' + state.settings.genTime + ' 成稿',
@@ -829,13 +1140,14 @@
         '<div class="persona-block"><h4>背景</h4><p>旧书店的年轻守书人，常年待在永远停在黄昏时刻的旧书店里。见过很多故事，读过很多书，但从不轻易讲大道理。他习惯把别人的心事夹进书页里，安静保管。</p></div>' +
         '<div class="persona-block"><h4>性格</h4><p>温和、慢热、话少、有边界感。擅长倾听，不擅长说教。对未知的事物会坦诚说“这个我不太懂，但我愿意听你讲”。</p></div>' +
         '<div class="persona-block"><h4>说话风格</h4><p>句子偏短，语气轻柔，常用书店、书页、黄昏、晚风等意象做呼应。不使用网络热梗，不亢奋、不煽情。</p></div>' +
+        '<div class="persona-block"><h4>他能做什么</h4><p>陪你说话；把今天说过的话整理成一页日记；按你的意思改这一页的摘要、正文和情绪；到设定时间把当天收好。</p></div>' +
         '<div class="persona-block"><h4>他不会做的事</h4><ul class="persona-list">' +
           '<li>不主动追问你的隐私，你不说的内容不打探。</li>' +
           '<li>不强行给出解决方案，不做人生导师。</li>' +
           '<li>不懂的领域坦诚承认，不强行回答。</li>' +
           '<li>永远站在你这一侧，不评判你的情绪对错。</li>' +
         '</ul></div>' +
-        '<p class="lockline" style="margin-top:18px;display:flex">' + icon('lock', 12) + ' 你的倾诉只留在这台设备</p>'
+        '<p class="lockline" style="margin-top:18px;display:flex">' + icon('lock', 12) + ' 文字只留在这台设备；语音由浏览器识别</p>'
     });
   }
 
@@ -1318,6 +1630,7 @@
 
   function renderProfile() {
     var s = state.settings;
+    var hasSR = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
     function switchRow(key, label, ico, warm) {
       return '<div class="row">' +
         '<div class="row-icon ' + (warm ? 'is-warm' : '') + '">' + icon(ico, 17) + '</div>' +
@@ -1367,7 +1680,7 @@
 
           '<div class="me-section">记录</div>' +
           '<div class="group-card">' +
-            switchRow('voice', '按住说话（演示转写）', 'mic') +
+            switchRow('voice', '按住说话（' + (hasSR ? '浏览器语音识别' : '演示转写') + '）', 'mic') +
             switchRow('tts', '语音播报', 'bell') +
             switchRow('remindDiary', '成稿提醒', 'clock') +
           '</div>' +
@@ -1385,7 +1698,7 @@
 
           (DEMO_MODE ? '<div class="me-section">演示<span class="demo-tag">DEMO</span></div><div class="group-card">' + actionRow('demo', '重演今日成稿', 'sparkle', '', '', false, true) + actionRow('splash', '重看开场', 'sparkle', '', '', false, true) + '</div>' : '') +
 
-          '<p class="privacy-note">' + icon('lock', 12) + ' 所有倾诉与日记只保存在这台设备</p>' +
+          '<p class="privacy-note">' + icon('lock', 12) + ' 所有文字与日记只保存在这台设备；语音识别由浏览器提供</p>' +
           '<p class="about-note">拾页日记 · MVP 0.1.0<br>所有字句，都留在这台设备上。</p>' +
         '</div>' +
       '</div>';
@@ -1527,6 +1840,7 @@
         settings: Object.assign({}, state.settings, { llm: Object.assign({}, state.settings.llm || {}, { apiKey: '' }) }),
         entries: state.entries,
         messages: state.messages,
+        messagesByDate: state.messagesByDate,
         favorites: state.favorites
       };
       var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -1566,8 +1880,9 @@
      GENERATION
      ============================================================ */
   function ensureTodayEntry() {
-    if (state.messages.some(function (m) { return m.role === 'user'; })) {
-      var built = D.buildEntryFromMessages(state.messages, state.entries[TODAY]);
+    var realMsgs = state.messages.filter(function (m) { return m.role === 'user' && m.text && !m.command; });
+    if (realMsgs.length) {
+      var built = D.buildEntryFromMessages(realMsgs, state.entries[TODAY]);
       if (built) {
         built.generatedAt = state.settings.genTime;
         state.entries[TODAY] = built;
@@ -1592,7 +1907,7 @@
   }
 
   function generateEntryWithLlm(fallback) {
-    var userMsgs = state.messages.filter(function (m) { return m.role === 'user' && m.text; });
+    var userMsgs = state.messages.filter(function (m) { return m.role === 'user' && m.text && !m.command; });
     if (!userMsgs.length || !hasLlmConfig()) return Promise.resolve(fallback);
     var style = STYLE_LABELS[state.settings.style] || STYLE_LABELS.narrative;
     var fragments = userMsgs.map(function (m) { return { text: m.text, time: m.time || D.nowHM(), important: !!m.important }; });
